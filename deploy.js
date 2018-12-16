@@ -10,10 +10,14 @@ const provider = new HDWalletProvider(
 );
 const web3 = new Web3(provider);
 
-const tokens = (tokens) => new BigNumber(tokens).multipliedBy(1e+18).toString();
+const {
+  SECONDS_PER_MONTH,
+  VESTED_TOKENS,
+  CLIFF_DURATION,
+  TOTAL_VEST_DURATION,
+} = require('./config');
 
-const SECONDS_PER_MONTH = 2628000;
-const LOCKED_BALANCE = tokens(1200);
+const tokens = (tokens) => new BigNumber(tokens).multipliedBy(1e+18).toString();
 
 const deploy = async () => {
   const accounts = await web3.eth.getAccounts();
@@ -24,17 +28,18 @@ const deploy = async () => {
     .deploy({
       data: tokenVesting.bytecode,
       arguments: [
-        accounts[0], // beneficiary
+        BENEFICIARYADDRESS, // bene
         TOKENADDRESS, // token
-        Date.now(), // start timestamp
-        SECONDS_PER_MONTH * 12, // cliff for a year
-        (SECONDS_PER_MONTH * 12 + 30).toString(), // Release every month for a year
-        false, //revoke
-        tokens(100), // Tokens to release every month
+        STARTINGTIME- Date.now() / 1000, // start
+        CLIFF_DURATION, //cliff
+        TOTAL_VEST_DURATION, // vestDuration
+        SET_REVOKABLE, //revoke
+        tokens(VESTED_TOKENS), // tokensPerMonth
       ]
-    })
-    .send({
-      gas: "1600000",
+    });
+
+  result = result.send({
+      gas: await result.estimateGas(),
       from: accounts[0]
     });
   result.setProvider(provider);
