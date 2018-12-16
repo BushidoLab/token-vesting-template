@@ -18,6 +18,7 @@ const {
   TOTAL_VEST_DURATION,
   FIRST_PHASE,
   SECOND_PHASE,
+  THIRD_PHASE,
 } = require('../config');
 
 let vesting;
@@ -28,8 +29,14 @@ const callRPC = (method, params = [], callback) => web3.currentProvider.sendAsyn
 
 const tokens = (tokens) => new BigNumber(tokens).multipliedBy(1e+18).toString();
 
+const calculateGas = async (method) => {
+  const gas = await vesting.methods[method]().estimateGas();
+  console.log(`Gas used: ${gas}`)
+  return gas;
+}
+
 const timeTravel = async seconds => {
-  console.log(`Traveling ${seconds} seconds into the future.`)
+  console.log(`Traveling ${seconds / SECONDS_PER_MONTH} months into the future.`)
   await callRPC('evm_increaseTime', [seconds], () => {})
   await callRPC('evm_mine', [], () => {})
 }
@@ -38,8 +45,6 @@ const testBlocking = () => {
   it('blocks fetching tokens', async () => {
     try {
       const block = await web3.eth.getBlock("latest")
-      console.log(`Block number: ${block.number}`)
-      console.log(`Block timestamp: ${block.timestamp}`)
       await vesting.methods.release(token.options.address).send({
         from: accounts[0],
       });
@@ -52,14 +57,11 @@ const testBlocking = () => {
 
 const outputBlockNumber = async () => {
   const block = await web3.eth.getBlock("latest")
-  console.log(`Block number: ${block.number}`)
-  console.log(`Block timestamp: ${block.timestamp}`)
+  console.log(`Block timestamp: ${new Date(block.timestamp)}`)
 }
 
 before(async () => {
   accounts = await web3.eth.getAccounts();
-
-  const block = await web3.eth.getBlock("latest")
   
   token = await new web3.eth.Contract(JSON.parse(erc20.interface))
     .deploy({ 
@@ -73,6 +75,8 @@ before(async () => {
       from: accounts[2],
       gas: '1000000',
     });
+
+  const block = await web3.eth.getBlock("latest")
 
   vesting = await new web3.eth.Contract(JSON.parse(tokenVesting.interface))
     .deploy({ 
@@ -89,7 +93,7 @@ before(async () => {
     })
     .send({
       from: accounts[0],
-      gas: '1700000',
+      gas: '2600000',
     });
   outputBlockNumber();
 });
@@ -117,6 +121,7 @@ describe('Revoking Tokens from Contract', () => {
     try {
       await vesting.methods.release().send({
         from: accounts[0],
+        gas: await calculateGas('release'),
       });
       assert.fail();
     } catch (err) {
@@ -128,7 +133,7 @@ describe('Revoking Tokens from Contract', () => {
     const months = await vesting.methods.monthsToVest().call({
       from: accounts[0],
     });
-    assert.equal(months, ((TOTAL_VEST_DURATION - CLIFF_DURATION) / SECONDS_PER_MONTH).toString())
+    assert.equal(months, MONTHS_TO_RELEASE);
   })
 
   it(`sets into the future past the cliff`, async () => {
@@ -141,18 +146,16 @@ describe('Revoking Tokens from Contract', () => {
     })
 
     it(`allows fetching tokens at ${i} months`, async () => {
-      const release = await vesting.methods.release().send({
+      await vesting.methods.release().send({
         from: accounts[0],
+        gas: await calculateGas('release'),
       });
-      // await outputBlockNumber();
-      console.log(`Sent ${release.events['TokensReleased'].returnValues.amount} tokens`)
     })
 
     it(`beneficiary has balance of ${TOKENS_PER_MONTH * i}`, async () => {
       const balance = await token.methods.balanceOf(accounts[1]).call({
         from: accounts[0],
       });
-      console.log(`Beneficiary balance is ${balance}`)
       assert.equal(balance, tokens(TOKENS_PER_MONTH * i))
     })
   }
@@ -161,14 +164,14 @@ describe('Revoking Tokens from Contract', () => {
     await timeTravel(SECOND_PHASE * SECONDS_PER_MONTH);
   })
 
-  it('tries revoking', async () => {
+  it(`tries revoking ${THIRD_PHASE * TOKENS_PER_MONTH} tokens`, async () => {
     const release = await vesting.methods.revoke().send({
       from: accounts[0],
-      gas: '120000',
+      gas: await calculateGas('revoke'),
     });
     // await outputBlockNumber();
-    console.log(`Revoked ${tokens((MONTHS_TO_RELEASE - FIRST_PHASE - SECOND_PHASE) * TOKENS_PER_MONTH)} tokens`)
-    assert.equal(tokens((MONTHS_TO_RELEASE - FIRST_PHASE - SECOND_PHASE) * TOKENS_PER_MONTH), release.events['TokenVestingRevoked'].returnValues.amount)
+    console.log(`Revoked ${tokens(THIRD_PHASE * TOKENS_PER_MONTH)} tokens`)
+    assert.equal(tokens(THIRD_PHASE * TOKENS_PER_MONTH), release.events['TokenVestingRevoked'].returnValues.amount)
   })
 
   it(`owner has balance of ${tokens(SECOND_PHASE * TOKENS_PER_MONTH)} after revoking`, async () => {
@@ -185,12 +188,12 @@ describe('Revoking Tokens from Contract', () => {
     assert.equal(balance, tokens(TOKENS_PER_MONTH * SECOND_PHASE));
   })
 
-  it(`allows releasing tokens not revoked`, async () => {
+  it(`allows releasing ${TOKENS_PER_MONTH * SECOND_PHASE} tokens not revoked`, async () => {
     const release = await vesting.methods.release().send({
       from: accounts[0],
+      gas: await calculateGas('release'),
     });
     // await outputBlockNumber();
-    console.log(`Sent ${release.events['TokensReleased'].returnValues.amount} tokens`)
     assert.equal(tokens(TOKENS_PER_MONTH * SECOND_PHASE), release.events['TokensReleased'].returnValues.amount)
   })
 
@@ -198,10 +201,10 @@ describe('Revoking Tokens from Contract', () => {
     try {
       await vesting.methods.revoke().send({
         from: accounts[0],
+        gas: await calculateGas('revoke'),
       });
       assert.fail();
     } catch (err) {
-      console.log(err.message)
       assert.ok(/already/.test(err.message));
     }
   })

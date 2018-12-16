@@ -1,3 +1,4 @@
+
 pragma solidity ^0.4.24;
 
 import "./SafeERC20.sol";
@@ -16,6 +17,8 @@ contract TokenVesting is Ownable {
     using SafeMath64 for uint64;
     using SafeERC20 for IERC20;
 
+    uint64 constant internal SECONDS_PER_MONTH = 2628000;
+
     event TokensReleased(uint256 amount);
     event TokenVestingRevoked(uint256 amount);
 
@@ -33,14 +36,14 @@ contract TokenVesting is Ownable {
 
     uint256 private _released;
 
-    uint64 constant internal SECONDS_PER_MONTH = 2628000;
+    uint64[] private _monthTimestamps;
+    uint256 private _tokensPerMonth;
+    // struct MonthlyVestAmounts {
+    //     uint timestamp;
+    //     uint amount;
+    // }
 
-    struct MonthlyVestAmounts {
-        uint timestamp;
-        uint amount;
-    }
-
-    MonthlyVestAmounts[] private _vestings;
+    // MonthlyVestAmounts[] private _vestings;
 
     /**
      * @dev Creates a vesting contract that vests its balance of the ERC20 token declared to the
@@ -71,14 +74,11 @@ contract TokenVesting is Ownable {
         require(totalReleasingTime.mod(SECONDS_PER_MONTH) == 0);
         uint64 releasingMonths = totalReleasingTime.div(SECONDS_PER_MONTH);
         require(totalTokens.mod(releasingMonths) == 0);
-        uint256 tokensPerMonth = totalTokens.div(releasingMonths);
-
+        _tokensPerMonth = totalTokens.div(releasingMonths);
+    
         for (uint64 month = 0; month < releasingMonths; month++) {
-            uint256 monthTimestamp = uint256(_cliff.add(month.mul(SECONDS_PER_MONTH)).add(SECONDS_PER_MONTH));
-            _vestings.push(MonthlyVestAmounts(
-                monthTimestamp,
-                tokensPerMonth
-            ));
+            uint64 monthTimestamp = uint64(start.add(cliffDuration).add(month.mul(SECONDS_PER_MONTH)).add(SECONDS_PER_MONTH));
+            _monthTimestamps.push(monthTimestamp);
         }
     }
 
@@ -116,21 +116,21 @@ contract TokenVesting is Ownable {
      * @return the amount of months to vest.
      */
     function monthsToVest() public view returns (uint256) {
-        return _vestings.length;
+        return _monthTimestamps.length;
     }
     /**
      * @return the amount of tokens vested.
      */
     function amountVested() public view returns (uint256) {
         uint256 vested = 0;
-        for (uint month = 0; month < _vestings.length; month++) {
-            MonthlyVestAmounts memory monthlyVest = _vestings[month];
-            if (block.timestamp >= monthlyVest.timestamp) {
-                if (monthlyVest.amount > 0) {
-                    vested = vested.add(monthlyVest.amount);
-                }
+
+        for (uint256 month = 0; month < _monthTimestamps.length; month++) {
+            uint256 monthlyVestTimestamp = _monthTimestamps[month];
+            if (monthlyVestTimestamp > 0 && block.timestamp >= monthlyVestTimestamp) {
+                vested = vested.add(_tokensPerMonth);
             }
         }
+
         return vested;
     }
     /**
@@ -157,13 +157,16 @@ contract TokenVesting is Ownable {
      */
     function release() public {
         require(block.timestamp > _cliff, "Cliff hasnt started yet.");
-        uint amountToSend = 0;
-        for (uint month = 0; month < _vestings.length; month++) {
-            MonthlyVestAmounts storage monthlyVest = _vestings[month];
-            if (block.timestamp >= monthlyVest.timestamp) {
-                if (monthlyVest.amount > 0) {
-                    amountToSend = amountToSend.add(monthlyVest.amount);
-                    monthlyVest.amount = 0;
+        uint256 amountToSend = 0;
+
+        for (uint256 month = 0; month < _monthTimestamps.length; month++) {
+            uint256 monthlyVestTimestamp = _monthTimestamps[month];
+            if (monthlyVestTimestamp > 0) {
+                if (block.timestamp >= monthlyVestTimestamp) {
+                    _monthTimestamps[month] = 0;
+                    amountToSend = amountToSend.add(_tokensPerMonth);
+                } else {
+                    break;
                 }
             }
         }
@@ -185,14 +188,12 @@ contract TokenVesting is Ownable {
         require(block.timestamp > _cliff, "Cliff hasnt started yet.");
 
         _revoked = true;
-        uint amountToSend = 0;
-        for (uint month = 0; month < _vestings.length; month++) {
-            MonthlyVestAmounts storage monthlyVest = _vestings[month];
-            if (block.timestamp <= monthlyVest.timestamp) {
-                if (monthlyVest.amount > 0) {
-                    amountToSend = amountToSend.add(monthlyVest.amount);
-                    monthlyVest.amount = 0;
-                }
+        uint256 amountToSend = 0;
+        for (uint256 month = 0; month < _monthTimestamps.length; month++) {
+            uint256 monthlyVestTimestamp = _monthTimestamps[month];
+            if (block.timestamp <= monthlyVestTimestamp) {
+                _monthTimestamps[month] = 0;
+                amountToSend = amountToSend.add(_tokensPerMonth);
             }
         }
 
