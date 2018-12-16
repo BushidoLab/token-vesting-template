@@ -90,10 +90,12 @@ before(async () => {
         true, //revoke
         tokens(VESTED_TOKENS), // tokensPerMonth
       ] 
-    })
-    .send({
+    });
+  const gas = await vesting.estimateGas();
+  console.log(`Gas to deploy: ${gas}`);
+  vesting = await vesting.send({
       from: accounts[0],
-      gas: '2600000',
+      gas,
     });
   outputBlockNumber();
 });

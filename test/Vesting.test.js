@@ -36,7 +36,7 @@ const calculateGas = async (method) => {
 }
 
 const timeTravel = async seconds => {
-  console.log(`Traveling ${seconds} seconds into the future.`)
+  console.log(`Traveling ${seconds / SECONDS_PER_MONTH} months into the future.`)
   await callRPC('evm_increaseTime', [seconds], () => {})
   await callRPC('evm_mine', [], () => {})
 }
@@ -76,10 +76,12 @@ before(async () => {
         false, //revoke
         tokens(VESTED_TOKENS), // totalTokens
       ] 
-    })
-    .send({
+    });
+  const gas = await vesting.estimateGas();
+  console.log(`Gas to deploy: ${gas}`);
+  vesting = await vesting.send({
       from: accounts[0],
-      gas: '1700000',
+      gas,
     });
 });
 
